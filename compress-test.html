@@ -1,0 +1,104 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Compress test</title></head><body>
+<h2>Video compression harness</h2>
+<input type="file" id="f" accept="video/*">
+<button id="go">Compress</button>
+<pre id="out">waiting…</pre>
+<video id="prev" controls playsinline style="max-width:480px"></video>
+<script>
+function blobToDataURL(blob){ return new Promise((res, rej) => { const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); }); }
+async function compressVideoFile(srcBlob, targetBytes){
+  if(typeof MediaRecorder === 'undefined') return null;
+  const mime = ['video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){ return false; } });
+  if(!mime) return null;
+  const url = URL.createObjectURL(srcBlob);
+  try {
+    const video = document.createElement('video');
+    video.src = url; video.muted = true; video.playsInline = true; video.preload = 'auto';
+    await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error('load')); });
+    const dur = video.duration;
+    if(!dur || !isFinite(dur) || !video.videoWidth) return null;
+    const scale = Math.min(1, 720 / Math.max(video.videoWidth, video.videoHeight));
+    const w = Math.max(2, Math.round(video.videoWidth * scale / 2) * 2);
+    const h = Math.max(2, Math.round(video.videoHeight * scale / 2) * 2);
+    const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const stream = canvas.captureStream(30);
+    let audioTracks = [];
+    try { const vs = video.captureStream ? video.captureStream() : null; if(vs) audioTracks = vs.getAudioTracks(); } catch(e){}
+    const combined = new MediaStream([...stream.getVideoTracks(), ...audioTracks]);
+    const bitrate = Math.max(400000, Math.min(8000000, Math.floor(targetBytes * 8 / dur)));
+    const rec = new MediaRecorder(combined, { mimeType: mime, videoBitsPerSecond: bitrate });
+    const chunks = [];
+    rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+    const stopped = new Promise((res, rej) => { rec.onstop = res; rec.onerror = () => rej(new Error('record')); });
+    let raf = 0;
+    const draw = () => { try { ctx.drawImage(video, 0, 0, w, h); } catch(e){} raf = requestAnimationFrame(draw); };
+    video.currentTime = 0;
+    await video.play().catch(() => {});
+    draw(); rec.start(250);
+    await new Promise(res => { video.onended = res; });
+    cancelAnimationFrame(raf);
+    if(rec.state !== 'inactive') rec.stop();
+    await stopped;
+    const blob = new Blob(chunks, { type: mime.split(';')[0] });
+    if(!blob.size) return null;
+    return { blob, ext: mime.indexOf('mp4') >= 0 ? 'mp4' : 'webm' };
+  } finally { try { URL.revokeObjectURL(url); } catch(e){} }
+}
+
+async function compressVideoFile(srcBlob, targetBytes){
+  if(typeof MediaRecorder === 'undefined') return null;
+  const mime = ['video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){ return false; } });
+  if(!mime) return null;
+  const url = URL.createObjectURL(srcBlob);
+  try {
+    const video = document.createElement('video');
+    video.src = url; video.muted = true; video.playsInline = true; video.preload = 'auto';
+    await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error('load')); });
+    const dur = video.duration;
+    if(!dur || !isFinite(dur) || !video.videoWidth) return null;
+    const scale = Math.min(1, 720 / Math.max(video.videoWidth, video.videoHeight));
+    const w = Math.max(2, Math.round(video.videoWidth * scale / 2) * 2);
+    const h = Math.max(2, Math.round(video.videoHeight * scale / 2) * 2);
+    const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const stream = canvas.captureStream(30);
+    let audioTracks = [];
+    try { const vs = video.captureStream ? video.captureStream() : null; if(vs) audioTracks = vs.getAudioTracks(); } catch(e){}
+    const combined = new MediaStream([...stream.getVideoTracks(), ...audioTracks]);
+    const bitrate = Math.max(400000, Math.min(8000000, Math.floor(targetBytes * 8 / dur)));
+    const rec = new MediaRecorder(combined, { mimeType: mime, videoBitsPerSecond: bitrate });
+    const chunks = [];
+    rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+    const stopped = new Promise((res, rej) => { rec.onstop = res; rec.onerror = () => rej(new Error('record')); });
+    let raf = 0;
+    const draw = () => { try { ctx.drawImage(video, 0, 0, w, h); } catch(e){} raf = requestAnimationFrame(draw); };
+    video.currentTime = 0;
+    await video.play().catch(() => {});
+    draw(); rec.start(250);
+    await new Promise(res => { video.onended = res; });
+    cancelAnimationFrame(raf);
+    if(rec.state !== 'inactive') rec.stop();
+    await stopped;
+    const blob = new Blob(chunks, { type: mime.split(';')[0] });
+    if(!blob.size) return null;
+    return { blob, ext: mime.indexOf('mp4') >= 0 ? 'mp4' : 'webm' };
+  } finally { try { URL.revokeObjectURL(url); } catch(e){} }
+}
+
+const out = document.getElementById('out');
+document.getElementById('go').onclick = async () => {
+  const file = document.getElementById('f').files[0];
+  if(!file){ out.textContent = 'NO FILE SELECTED'; return; }
+  out.textContent = 'loaded ' + file.name + ' ' + (file.size/1048576).toFixed(1) + 'MB, type ' + file.type + ' — compressing…';
+  const t0 = performance.now();
+  try {
+    const res = await compressVideoFile(file, 65*1024*1024);
+    const dt = ((performance.now()-t0)/1000).toFixed(1);
+    if(!res){ out.textContent = 'RESULT: null (unsupported or failed to load)'; return; }
+    const url = URL.createObjectURL(res.blob);
+    document.getElementById('prev').src = url;
+    out.textContent = 'RESULT OK | input ' + (file.size/1048576).toFixed(1) + 'MB | output ' + (res.blob.size/1048576).toFixed(1) + 'MB (' + res.ext + ') | time ' + dt + 's for a ' + file.name + ' video | output playable in preview above';
+  } catch(e) { out.textContent = 'ERROR: ' + (e && e.message ? e.message : e); }
+};
+</script></body></html>
