@@ -1,0 +1,142 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>story autoplay test</title>
+<style>body{font-family:sans-serif;background:#111;color:#fff;margin:0}
+#moments-row{display:flex;gap:14px;padding:14px}
+.moment{text-align:center;font-size:13px;cursor:pointer}
+.moment .ring{width:64px;height:64px;border-radius:50%;padding:3px;border:3px solid #f5a623}
+.moment .ring.seen{border-color:#555}
+.moment .ring img{width:100%;height:100%;border-radius:50%;object-fit:cover}
+.moment .ring.add{border-style:dashed}
+.story-viewer{position:fixed;inset:0;z-index:120;background:#000;display:flex;flex-direction:column;align-items:center}
+.story-viewer .bars{display:flex;gap:5px;padding:14px 14px 8px}
+.story-viewer .bars i{flex:1;height:3px;border-radius:99px;background:rgba(255,255,255,.35);overflow:hidden}
+.story-viewer .bars i b{display:block;height:100%;background:#fff;width:0}
+.story-viewer img.stage{flex:1;object-fit:contain;min-height:0;cursor:pointer}
+.story-viewer .s-head{display:flex;align-items:center;gap:10px;padding:4px 14px 10px;color:#fff;font-weight:700}
+.story-viewer .s-foot{display:flex;gap:8px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));align-items:center;color:#fff}
+.music-bar{display:flex;gap:10px;padding:8px 12px;background:#222;border-radius:14px}
+#test-result{padding:14px;font-weight:700}</style></head><body>
+<div id="moments-row"></div><div id="story-root"></div><div id="test-result">running…</div>
+<script>
+const GENERIC_AVATAR='https://picsum.photos/seed/av/100';
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function verifiedBadge(u){ return ''; }
+function apiAction(){}
+const ICONS={heart:'♡'};
+function meUser(){ return { handle:'srikal', avatar:'https://picsum.photos/seed/me/100' }; }
+function openCreate(){}
+let storyTimer=null, storyIdx=0;
+let stories=[
+ {id:'s1', user:{handle:'srikal', avatar:'https://picsum.photos/seed/a/100'}, img:'https://picsum.photos/seed/p1/600/800', label:'one', seen:false},
+ {id:'s2', user:{handle:'srikal', avatar:'https://picsum.photos/seed/a/100'}, img:'https://picsum.photos/seed/p2/600/800', label:'two', seen:false},
+ {id:'s3', user:{handle:'srikal', avatar:'https://picsum.photos/seed/a/100'}, img:'https://picsum.photos/seed/p3/600/800', label:'three', seen:false},
+ {id:'s4', user:{handle:'bob', avatar:'https://picsum.photos/seed/b/100'}, img:'https://picsum.photos/seed/p4/600/800', label:'bob one', seen:false},
+ {id:'s5', user:{handle:'bob', avatar:'https://picsum.photos/seed/b/100'}, img:'https://picsum.photos/seed/p5/600/800', label:'bob two', seen:false},
+];
+let _musicAudio=null, _musicKey=null;
+function renderMoments(){
+  const me = meUser();
+  let h = '<div class="moment" onclick="openCreate(\'story\')"><div class="ring add"><img src="'+me.avatar+'" style="border-radius:50%;width:100%;height:100%;object-fit:cover" alt=""><span class="plus">+</span></div><span>Your moment</span></div>';
+  // One circle per person, not one per picture: tapping a circle plays all
+  // of that person's moments in sequence (the viewer already advances
+  // through the flat list, so playback continues across people too).
+  const groups = [];
+  stories.forEach((s,i)=>{ const key = (s.user && (s.user.id || s.user.handle)) || ('u'+i); let g = groups.find(x=>x.key===key); if(!g){ g={key, user:s.user || { handle:'user', avatar:GENERIC_AVATAR }, first:i, allSeen:true}; groups.push(g); } if(!s.seen) g.allSeen=false; });
+  groups.forEach(g=>{ h += '<div class="moment" onclick="openStory('+g.first+')"><div class="ring'+(g.allSeen?' seen':'')+'"><img src="'+(g.user.avatar||GENERIC_AVATAR)+'" alt=""></div><span>'+esc(g.user.handle||'user')+'</span></div>'; });
+  document.getElementById('moments-row').innerHTML = h;
+}
+function openStory(i){
+  stopMusic();
+  storyIdx=i; const s=stories[i]; s.seen=true; renderMoments(); if(s.id) apiAction('/stories/'+s.id+'/view');
+  const root=document.getElementById('story-root');
+  root.innerHTML = '<div class="story-viewer"><div class="story-inner"><div class="bars">'+stories.map((_,j)=>'<i><b id="sbar-'+j+'" style="width:'+(j<i?100:0)+'%"></b></i>').join('')+'</div>'
+    +'<div class="s-head"><img class="avatar" style="width:36px;height:36px" src="'+s.user.avatar+'"><span>'+esc(s.user.handle)+verifiedBadge(s.user)+'</span><span style="opacity:.7;font-weight:500;font-size:13px">'+esc(s.label)+'</span><button style="margin-left:auto;color:#fff;font-size:22px" onclick="closeStory()">✕</button></div>'
+    +'<img class="stage" src="'+s.img+'" onclick="nextStory()">'
+    +(s.music ? '<div style="padding:0 14px">'+musicBarHtml(s.music, s.id)+'</div>' : '')
+    +'<div class="s-foot"><input id="story-reply" placeholder="Reply to '+esc(s.user.handle)+'…" onkeydown="if(event.key===\'Enter\')sendStoryReply()"><button class="send-btn" onclick="sendStoryReply()">Send</button><button onclick="likeStory(this)" style="color:#fff">'+ICONS.heart+'</button></div></div></div>';
+  const bar=document.getElementById('sbar-'+i); let p=0;
+  clearInterval(storyTimer);
+  storyTimer=setInterval(()=>{ p+=2; if(bar) bar.style.width=p+'%'; if(p>=100) nextStory(); },100);
+}
+function nextStory(){ clearInterval(storyTimer); if(storyIdx < stories.length-1) openStory(storyIdx+1); else closeStory(); }
+function closeStory(){ stopMusic(); clearInterval(storyTimer); document.getElementById('story-root').innerHTML=''; }
+function likeStory(btn){ btn.innerHTML=ICONS.heartFill; toast('Liked'); }
+function sendStoryReply(){ const v=document.getElementById('story-reply').value.trim(); if(!v) return; toast('Reply sent'); closeStory(); }
+
+/* ---------------- feed ---------------- */
+function setFeedFilter(f, btn){ feedFilter=f; document.querySelectorAll('#feed-pills .pill').forEach(p=>p.classList.remove('active')); btn.classList.add('active'); renderFeed(); }
+function renderFeed(){
+  posts.forEach(p=>{ if(p.liked) liked.add(p.id); if(p.saved) saved.add(p.id); });
+  let list = allPosts();
+  // Clips and videos live only in Clips/Watch — never as caption-only cards
+  // in the feed (postHtml has no video branch, so they used to render like
+  // text threads showing just the title/caption).
+  list = list.filter(p => p.type !== 'clip' && p.type !== 'video');
+  if(feedFilter==='photo') list=list.filter(p=>p.type==='photo');
+  if(feedFilter==='thread') list=list.filter(p=>p.type==='thread');
+  if(feedFilter==='poll') list=list.filter(p=>p.type==='poll');
+  if(feedFilter==='following') list=list.filter(p=>p.mine || following.has(p.user.handle));
+  if(feedFilter==='saved') list=list.filter(p=>saved.has(p.id));
+  const el=document.getElementById('feed');
+  if(!list.length){ el.innerHTML='<div class="empty-note"><b>Nothing here yet</b>When you or people you follow post, it shows up here.<br><br><button class="btn auto" onclick="openCreate()">Make the first post</button></div>'; return; }
+  el.innerHTML = list.map(postHtml).join('');
+}
+function closeStory(){ stopMusic(); clearInterval(storyTimer); document.getElementById('story-root').innerHTML=''; }
+function likeStory(btn){ btn.innerHTML=ICONS.heartFill; toast('Liked'); }
+function sendStoryReply(){ const v=document.getElementById('story-reply').value.trim(); if(!v) return; toast('Reply sent'); closeStory(); }
+
+/* ---------------- feed ---------------- */
+function setFeedFilter(f, btn){ feedFilter=f; document.querySelectorAll('#feed-pills .pill').forEach(p=>p.classList.remove('active')); btn.classList.add('active'); renderFeed(); }
+function renderFeed(){
+  posts.forEach(p=>{ if(p.liked) liked.add(p.id); if(p.saved) saved.add(p.id); });
+  let list = allPosts();
+  // Clips and videos live only in Clips/Watch — never as caption-only cards
+  // in the feed (postHtml has no video branch, so they used to render like
+  // text threads showing just the title/caption).
+  list = list.filter(p => p.type !== 'clip' && p.type !== 'video');
+  if(feedFilter==='photo') list=list.filter(p=>p.type==='photo');
+  if(feedFilter==='thread') list=list.filter(p=>p.type==='thread');
+  if(feedFilter==='poll') list=list.filter(p=>p.type==='poll');
+  if(feedFilter==='following') list=list.filter(p=>p.mine || following.has(p.user.handle));
+  if(feedFilter==='saved') list=list.filter(p=>saved.has(p.id));
+  const el=document.getElementById('feed');
+  if(!list.length){ el.innerHTML='<div class="empty-note"><b>Nothing here yet</b>When you or people you follow post, it shows up here.<br><br><button class="btn auto" onclick="openCreate()">Make the first post</button></div>'; return; }
+  el.innerHTML = list.map(postHtml).join('');
+}
+function stopMusic(){ if(_musicAudio){ try{ _musicAudio.pause(); }catch{} _musicAudio = null; } _musicKey = null; document.querySelectorAll('.music-bar.playing').forEach(el => el.classList.remove('playing')); }
+function toggleMusic(key, url, el){
+  if(_musicKey === key && _musicAudio){ stopMusic(); return; }
+  stopMusic();
+  _musicAudio = new Audio(url);
+  _musicAudio.play().catch(()=>{});
+  _musicKey = key;
+  const bar = el && el.closest ? el.closest('.music-bar') : null;
+  if(bar) bar.classList.add('playing');
+  _musicAudio.onended = () => stopMusic();
+}
+function musicBarHtml(m, key){
+  if(!m || !m.previewUrl) return '';
+  return '<div class="music-bar" onclick="toggleMusic(\''+key+'\',\''+String(m.previewUrl).replace(/'/g, '%27')+'\',this)">'+(m.artwork?'<img src="'+m.artwork+'" alt="">':'')+'<div class="mt"><b>'+esc(m.title)+'</b><span>'+esc(m.artist)+'</span></div><div class="eq"><i></i><i></i><i></i><i></i></div></div>';
+}
+function toggleMusic(key, url, el){
+  if(_musicKey === key && _musicAudio){ stopMusic(); return; }
+  stopMusic();
+  _musicAudio = new Audio(url);
+  _musicAudio.play().catch(()=>{});
+  _musicKey = key;
+  const bar = el && el.closest ? el.closest('.music-bar') : null;
+  if(bar) bar.classList.add('playing');
+  _musicAudio.onended = () => stopMusic();
+}
+renderMoments();
+document.getElementById('test-result').textContent = 'circles: ' + document.querySelectorAll('#moments-row .moment').length + ' (expect 4: add + srikal + bob)';
+// auto-open the first story, then report where autoplay got to after 12s
+setTimeout(()=>{ openStory(0); }, 500);
+setTimeout(()=>{
+  const root = document.getElementById('story-root').innerHTML;
+  document.getElementById('test-result').textContent =
+    'RESULT circles=' + document.querySelectorAll('#moments-row .moment').length +
+    ' storyIdx=' + storyIdx + ' (expect 2 after 12s at 5s/story)' +
+    ' viewerOpen=' + (root.includes('story-viewer') ? 'yes' : 'no') +
+    ' label=' + (root.match(/opacity:.7[^>]*>([^<]*)/) ? RegExp.$1 : '?');
+}, 12500);
+</script></body></html>
